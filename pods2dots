@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# this script currently takes no options
+
+# podman-to-graphviz © 2024 by Timo Paulssen is licensed under CC BY-SA 4.0.
+# To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/
+
+function help () {
+  cat << EOH
+
+  # If you are wondering what this is,
+  # this is a file created by podman-to-graphviz.
+  # It is meant to be fed to one of the renderers
+  # of graphviz, your best choice is probably the
+  # one called dot.
+
+  # for png
+  #   dot -Tpng > pretty_podman_graph.png < this_file.dot
+  #
+  # on linux for a draggable interactive interface:
+  #   dot -Tx11 < this_file.dot
+
+EOH
+}
+
+help;
+
+shopt -s lastpipe
+echo "digraph {"
+podman container list --all --format '    "c_{{ .ID }}" [label="{{ .Names }}"];\n'
+podman image     list --all --format '    "i_{{ .ID }}" [shape="record";label="{{or .Names .ID}}{{ if .Tag }} | {{ .Tag }}{{ end }}"];\n'
+podman container list --all --format '    "c_{{ .ID }}" -> "i_{{ .ImageID }}" [label="cont->image"];\n'
+{
+  podman image list --all --format '{{ if .ParentId }}    "i_{{ .ID }}" -> "i_{{ slice .ParentId 0 12 }}" [label="image->parent"];{{ end }}'
+  for iid in $(podman image list -q); do
+    declare previous
+
+    previous=""
+    podman history --no-trunc --format '{{ if ne .ID "<missing>" }}{{ slice .ID 0 12 }} {{ html (printf "%.40s" .CreatedBy) }}{{ end }}' "$iid" | grep -v '^$' | while read -s -r florb; do
+      declare id commentline
+      echo "$florb" | read -s -r id commentline
+      [ -n "$previous" ] && echo "    \"i_$previous\" -> \"i_$id\" [label=\"build: $commentline\"];"
+      previous=$id
+    done
+  done
+} | grep -v '^$' | sort | uniq -w 49
+# 49 characters is the length of the i_prev -> i_id lines up to the label,
+# so this cuts the image->parent line if there's a build connection as well
+echo "}"
+
+help;
